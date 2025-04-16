@@ -301,50 +301,54 @@ class MyBMWAuthentication(httpx.Auth):
 
             # While PIL.Image is only needed in `get_capture_position`, we test it here to avoid
             # unneeded requests to the server.
-            try_import_pillow_image()
+            # try_import_pillow_image()
 
             # Get current RSA public certificate & use it to encrypt password
-            response = await client.get(
-                AUTH_CHINA_PUBLIC_KEY_URL,
-            )
-            pem_public_key = response.json()["data"]["value"]
+            # response = await client.get(
+            #     AUTH_CHINA_PUBLIC_KEY_URL,
+            # )
+            # pem_public_key = response.json()["data"]["value"]
 
-            public_key = RSA.import_key(pem_public_key)
-            cipher_rsa = PKCS1_v1_5.new(public_key)
-            encrypted = cipher_rsa.encrypt(self.password.encode())
-            pw_encrypted = base64.b64encode(encrypted).decode("UTF-8")
+            # public_key = RSA.import_key(pem_public_key)
+            # cipher_rsa = PKCS1_v1_5.new(public_key)
+            # encrypted = cipher_rsa.encrypt(self.password.encode())
+            # pw_encrypted = base64.b64encode(encrypted).decode("UTF-8")
 
-            captcha_res = await client.post(
-                AUTH_CHINA_CAPTCHA_URL,
-                json={"mobile": self.username},
-            )
-            verify_id = captcha_res.json()["data"]["verifyId"]
+            # captcha_res = await client.post(
+            #     AUTH_CHINA_CAPTCHA_URL,
+            #     json={"mobile": self.username},
+            # )
+            # verify_id = captcha_res.json()["data"]["verifyId"]
 
-            position = get_capture_position(captcha_res.json()["data"]["backGroundImg"])
-            await client.post(AUTH_CHINA_CAPTCHA_CHECK_URL, json={"position": position, "verifyId": verify_id})
+            # position = get_capture_position(captcha_res.json()["data"]["backGroundImg"])
+            # await client.post(AUTH_CHINA_CAPTCHA_CHECK_URL, json={"position": position, "verifyId": verify_id})
 
-            # Get token
-            response = await client.post(
-                AUTH_CHINA_LOGIN_URL,
-                headers={"x-login-nonce": generate_cn_nonce(self.username)},
-                json={
-                    "mobile": self.username,
-                    "password": pw_encrypted,
-                    "verifyId": verify_id,
-                    "deviceId": self.username,
-                },
-            )
-            response_json = response.json()["data"]
+            # # Get token
+            # response = await client.post(
+            #     AUTH_CHINA_LOGIN_URL,
+            #     headers={"x-login-nonce": generate_cn_nonce(self.username)},
+            #     json={
+            #         "mobile": self.username,
+            #         "password": pw_encrypted,
+            #         "verifyId": verify_id,
+            #         "deviceId": self.username,
+            #     },
+            # )
+            # response_json = response.json()["data"]
+
+
+            response = await client.post("https://bmw.yixi.pro/api/util/login", json={"mobile": self.username, "password": self.password})
+            token = response.json()["data"]["access_token"]
 
             decoded_token = jwt.decode(
-                response_json["access_token"], algorithms=["HS256"], options={"verify_signature": False}
+                token, algorithms=["HS256"], options={"verify_signature": False}
             )
 
         return {
-            "access_token": response_json["access_token"],
+            "access_token": token,
             "expires_at": datetime.datetime.fromtimestamp(decoded_token["exp"], tz=datetime.timezone.utc),
-            "refresh_token": response_json["refresh_token"],
-            "gcid": response_json["gcid"],
+            "refresh_token": response.json()["data"]["refresh_token"],
+            "gcid": response.json()["data"]["gcid"],
         }
 
     async def _refresh_token_china(self):
@@ -356,17 +360,25 @@ class MyBMWAuthentication(httpx.Auth):
 
                 # Try logging in using refresh_token
                 response = await client.post(
-                    AUTH_CHINA_TOKEN_URL,
-                    headers={"x-login-nonce": generate_cn_nonce(self.gcid)},
-                    data={
+                    "https://bmw.yixi.pro/api/util/refresh-token",
+                    json={
                         "refresh_token": self.refresh_token,
-                        "grant_type": "refresh_token",
+                        "gcid": self.gcid,
                     },
                 )
                 response_json = response.json()
 
                 expiration_time = int(response_json["expires_in"])
                 expires_at = current_utc_time + datetime.timedelta(seconds=expiration_time)
+
+              
+
+                # if current_utc_time - time > datetime.timedelta(minutes=20):
+                #     raise MyBMWAPIError
+
+                # decoded_token = jwt.decode(
+                #     token, algorithms=["HS256"], options={"verify_signature": False}
+                # )
 
         except MyBMWAPIError:
             _LOGGER.debug("Unable to get access token using refresh token, falling back to username/password.")
